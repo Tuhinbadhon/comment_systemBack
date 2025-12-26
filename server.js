@@ -84,6 +84,20 @@ const limiter = rateLimit({
 
 app.use("/api/", limiter);
 
+// Root route
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "Comment System API is running",
+    version: "1.0.0",
+    endpoints: {
+      health: "/api/health",
+      auth: "/api/auth",
+      comments: "/api/comments",
+    },
+  });
+});
+
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/comments", commentRoutes);
