@@ -1,4 +1,5 @@
 const Comment = require("../models/Comment");
+const pusher = require("../config/pusher");
 
 // @desc    Get all comments with pagination and sorting
 // @route   GET /api/comments
@@ -181,12 +182,14 @@ exports.createComment = async (req, res, next) => {
 
     await comment.populate("author", "username email");
 
-    // Emit socket event for real-time update
-    if (req.app.get("io")) {
-      req.app.get("io").emit("comment:created", {
+    // Trigger Pusher event for real-time update
+    try {
+      await pusher.trigger("comments", "comment:created", {
         comment: comment.toObject(),
         parentComment,
       });
+    } catch (pusherError) {
+      console.error("Pusher error:", pusherError);
     }
 
     res.status(201).json({
@@ -236,11 +239,13 @@ exports.updateComment = async (req, res, next) => {
       }
     ).populate("author", "username email");
 
-    // Emit socket event for real-time update
-    if (req.app.get("io")) {
-      req.app.get("io").emit("comment:updated", {
+    // Trigger Pusher event for real-time update
+    try {
+      await pusher.trigger("comments", "comment:updated", {
         comment: comment.toObject(),
       });
+    } catch (pusherError) {
+      console.error("Pusher error:", pusherError);
     }
 
     res.status(200).json({
@@ -289,11 +294,13 @@ exports.deleteComment = async (req, res, next) => {
 
     await comment.deleteOne();
 
-    // Emit socket event for real-time update
-    if (req.app.get("io")) {
-      req.app.get("io").emit("comment:deleted", {
+    // Trigger Pusher event for real-time update
+    try {
+      await pusher.trigger("comments", "comment:deleted", {
         commentId: req.params.id,
       });
+    } catch (pusherError) {
+      console.error("Pusher error:", pusherError);
     }
 
     res.status(200).json({
@@ -340,13 +347,15 @@ exports.likeComment = async (req, res, next) => {
     await comment.save();
     await comment.populate("author", "username email");
 
-    // Emit socket event for real-time update
-    if (req.app.get("io")) {
-      req.app.get("io").emit("comment:liked", {
+    // Trigger Pusher event for real-time update
+    try {
+      await pusher.trigger("comments", "comment:liked", {
         commentId: comment._id,
         likeCount: comment.likes.length,
         dislikeCount: comment.dislikes.length,
       });
+    } catch (pusherError) {
+      console.error("Pusher error:", pusherError);
     }
 
     res.status(200).json({
@@ -397,13 +406,15 @@ exports.dislikeComment = async (req, res, next) => {
     await comment.save();
     await comment.populate("author", "username email");
 
-    // Emit socket event for real-time update
-    if (req.app.get("io")) {
-      req.app.get("io").emit("comment:disliked", {
+    // Trigger Pusher event for real-time update
+    try {
+      await pusher.trigger("comments", "comment:disliked", {
         commentId: comment._id,
         likeCount: comment.likes.length,
         dislikeCount: comment.dislikes.length,
       });
+    } catch (pusherError) {
+      console.error("Pusher error:", pusherError);
     }
 
     res.status(200).json({

@@ -69,6 +69,10 @@ app.get("/", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/comments", commentRoutes);
 
+// Pusher test route (for manual verification)
+const testPusher = require("./routes/testPusher");
+app.use("/api", testPusher);
+
 // Health check route
 app.get("/api/health", (req, res) => {
   res.status(200).json({
