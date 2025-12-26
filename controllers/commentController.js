@@ -121,7 +121,7 @@ exports.getComments = async (req, res, next) => {
           content: 1,
           author: {
             _id: 1,
-            username: 1,
+            name: 1,
             email: 1,
           },
           parentComment: 1,
@@ -174,12 +174,12 @@ exports.getComments = async (req, res, next) => {
 exports.getComment = async (req, res, next) => {
   try {
     const comment = await Comment.findById(req.params.id)
-      .populate("author", "username email")
+      .populate("author", "name email")
       .populate({
         path: "replies",
         populate: {
           path: "author",
-          select: "username email",
+          select: "name email",
         },
       });
 
@@ -243,7 +243,7 @@ exports.createComment = async (req, res, next) => {
       });
     }
 
-    await comment.populate("author", "username email");
+    await comment.populate("author", "name email");
 
     // Trigger Pusher event for real-time update
     try {
@@ -300,7 +300,7 @@ exports.updateComment = async (req, res, next) => {
         new: true,
         runValidators: true,
       }
-    ).populate("author", "username email");
+    ).populate("author", "name email");
 
     // Trigger Pusher event for real-time update
     try {
@@ -392,8 +392,8 @@ exports.likeComment = async (req, res, next) => {
 
     const userId = req.user.id;
 
-    // Check if user already liked
-    const alreadyLiked = comment.likes.includes(userId);
+    // Check if already liked
+    const alreadyLiked = comment.likes.some((id) => id.toString() === userId);
 
     if (alreadyLiked) {
       // Remove like
@@ -403,28 +403,28 @@ exports.likeComment = async (req, res, next) => {
       comment.dislikes = comment.dislikes.filter(
         (id) => id.toString() !== userId
       );
+
       // Add like
       comment.likes.push(userId);
     }
 
     await comment.save();
-    await comment.populate("author", "username email");
+    await comment.populate("author", "name");
 
-    // Trigger Pusher event for real-time update
+    // 🔔 Pusher event (safe)
     try {
       const pusherData = {
         commentId: comment._id.toString(),
         likeCount: comment.likes.length,
         dislikeCount: comment.dislikes.length,
       };
-      // console.log("Triggering Pusher event comment:liked", pusherData);
+
       await pusher.trigger("comments", "comment:liked", pusherData);
-      // console.log("Pusher event sent successfully");
     } catch (pusherError) {
       console.error("Pusher error:", pusherError);
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: alreadyLiked ? "Like removed" : "Comment liked",
       data: {
@@ -470,7 +470,7 @@ exports.dislikeComment = async (req, res, next) => {
     }
 
     await comment.save();
-    await comment.populate("author", "username email");
+    await comment.populate("author", "name email");
 
     // Trigger Pusher event for real-time update
     try {
@@ -481,7 +481,7 @@ exports.dislikeComment = async (req, res, next) => {
       };
       // console.log("Triggering Pusher event comment:disliked", pusherData);
       await pusher.trigger("comments", "comment:disliked", pusherData);
-      // console.log("Pusher event sent successfully");s
+      // console.log("Pusher event sent successfully");
     } catch (pusherError) {
       console.error("Pusher error:", pusherError);
     }
@@ -529,7 +529,7 @@ exports.replyToComment = async (req, res, next) => {
       $push: { replies: reply._id },
     });
 
-    await reply.populate("author", "username email");
+    await reply.populate("author", "name email");
 
     // Trigger Pusher event for real-time update
     try {
