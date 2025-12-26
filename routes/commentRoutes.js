@@ -9,6 +9,7 @@ const {
   deleteComment,
   likeComment,
   dislikeComment,
+  replyToComment,
 } = require("../controllers/commentController");
 const { protect, optionalAuth } = require("../middleware/auth");
 const validate = require("../middleware/validate");
@@ -34,6 +35,15 @@ const updateCommentValidation = [
     .withMessage("Comment content is required")
     .isLength({ min: 1, max: 1000 })
     .withMessage("Comment must be between 1 and 1000 characters"),
+];
+
+const replyValidation = [
+  body("content")
+    .trim()
+    .notEmpty()
+    .withMessage("Reply content is required")
+    .isLength({ min: 1, max: 1000 })
+    .withMessage("Reply must be between 1 and 1000 characters"),
 ];
 
 const getCommentsValidation = [
@@ -62,5 +72,6 @@ router.put("/:id", updateCommentValidation, validate, protect, updateComment);
 router.delete("/:id", protect, deleteComment);
 router.post("/:id/like", protect, likeComment);
 router.post("/:id/dislike", protect, dislikeComment);
+router.post("/:id/reply", replyValidation, validate, protect, replyToComment);
 
 module.exports = router;

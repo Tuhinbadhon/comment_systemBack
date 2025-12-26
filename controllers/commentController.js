@@ -11,6 +11,8 @@ exports.getComments = async (req, res, next) => {
     const sortBy = req.query.sortBy || "newest"; // newest, mostLiked, mostDisliked
     const parentId = req.query.parentId || null;
 
+    console.log("Sort by:", sortBy); // Debug log
+
     const skip = (page - 1) * limit;
 
     // Build query
@@ -18,18 +20,30 @@ exports.getComments = async (req, res, next) => {
 
     // Build sort
     let sort = {};
-    switch (sortBy) {
-      case "mostLiked":
+    const sortByLower = sortBy.toLowerCase();
+    switch (sortByLower) {
+      case "mostliked":
+      case "most-liked":
         sort = { likeCount: -1, createdAt: -1 };
+        console.log("Sorting by most liked");
         break;
-      case "mostDisliked":
+      case "mostdisliked":
+      case "most-disliked":
         sort = { dislikeCount: -1, createdAt: -1 };
+        console.log("Sorting by most disliked");
+        break;
+      case "oldest":
+        sort = { createdAt: 1 };
+        console.log("Sorting by oldest");
         break;
       case "newest":
       default:
         sort = { createdAt: -1 };
+        console.log("Sorting by newest");
         break;
     }
+
+    console.log("Sort object:", sort); // Debug log
 
     // Get comments with aggregation for sorting by like/dislike count
     const comments = await Comment.aggregate([
@@ -53,6 +67,55 @@ exports.getComments = async (req, res, next) => {
         },
       },
       { $unwind: "$author" },
+      {
+        $lookup: {
+          from: "comments",
+          localField: "replies",
+          foreignField: "_id",
+          as: "replies",
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "replies.author",
+          foreignField: "_id",
+          as: "replyAuthors",
+        },
+      },
+      {
+        $addFields: {
+          replies: {
+            $map: {
+              input: "$replies",
+              as: "reply",
+              in: {
+                _id: "$$reply._id",
+                content: "$$reply.content",
+                author: {
+                  $arrayElemAt: [
+                    {
+                      $filter: {
+                        input: "$replyAuthors",
+                        as: "author",
+                        cond: { $eq: ["$$author._id", "$$reply.author"] },
+                      },
+                    },
+                    0,
+                  ],
+                },
+                likes: "$$reply.likes",
+                dislikes: "$$reply.dislikes",
+                likeCount: { $size: "$$reply.likes" },
+                dislikeCount: { $size: "$$reply.dislikes" },
+                isEdited: "$$reply.isEdited",
+                createdAt: "$$reply.createdAt",
+                updatedAt: "$$reply.updatedAt",
+              },
+            },
+          },
+        },
+      },
       {
         $project: {
           content: 1,
@@ -349,11 +412,14 @@ exports.likeComment = async (req, res, next) => {
 
     // Trigger Pusher event for real-time update
     try {
-      await pusher.trigger("comments", "comment:liked", {
-        commentId: comment._id,
+      const pusherData = {
+        commentId: comment._id.toString(),
         likeCount: comment.likes.length,
         dislikeCount: comment.dislikes.length,
-      });
+      };
+      // console.log("Triggering Pusher event comment:liked", pusherData);
+      await pusher.trigger("comments", "comment:liked", pusherData);
+      // console.log("Pusher event sent successfully");
     } catch (pusherError) {
       console.error("Pusher error:", pusherError);
     }
@@ -408,11 +474,14 @@ exports.dislikeComment = async (req, res, next) => {
 
     // Trigger Pusher event for real-time update
     try {
-      await pusher.trigger("comments", "comment:disliked", {
-        commentId: comment._id,
+      const pusherData = {
+        commentId: comment._id.toString(),
         likeCount: comment.likes.length,
         dislikeCount: comment.dislikes.length,
-      });
+      };
+      // console.log("Triggering Pusher event comment:disliked", pusherData);
+      await pusher.trigger("comments", "comment:disliked", pusherData);
+      // console.log("Pusher event sent successfully");s
     } catch (pusherError) {
       console.error("Pusher error:", pusherError);
     }
@@ -425,6 +494,57 @@ exports.dislikeComment = async (req, res, next) => {
         likeCount: comment.likes.length,
         dislikeCount: comment.dislikes.length,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Reply to a comment
+// @route   POST /api/comments/:id/reply
+// @access  Private
+exports.replyToComment = async (req, res, next) => {
+  try {
+    const { content } = req.body;
+    const parentCommentId = req.params.id;
+
+    // Verify parent comment exists
+    const parentComment = await Comment.findById(parentCommentId);
+    if (!parentComment) {
+      return res.status(404).json({
+        success: false,
+        message: "Parent comment not found",
+      });
+    }
+
+    // Create reply
+    const reply = await Comment.create({
+      content,
+      author: req.user.id,
+      parentComment: parentCommentId,
+    });
+
+    // Add to parent's replies array
+    await Comment.findByIdAndUpdate(parentCommentId, {
+      $push: { replies: reply._id },
+    });
+
+    await reply.populate("author", "username email");
+
+    // Trigger Pusher event for real-time update
+    try {
+      await pusher.trigger("comments", "comment:reply", {
+        reply: reply.toObject(),
+        parentCommentId,
+      });
+    } catch (pusherError) {
+      console.error("Pusher error:", pusherError);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: "Reply posted successfully",
+      data: reply,
     });
   } catch (error) {
     next(error);
