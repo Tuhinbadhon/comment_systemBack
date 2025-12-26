@@ -4,8 +4,6 @@ const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
-const http = require("http");
-const socketIo = require("socket.io");
 const connectDB = require("./config/db");
 const errorHandler = require("./middleware/errorHandler");
 
@@ -13,51 +11,20 @@ const errorHandler = require("./middleware/errorHandler");
 const authRoutes = require("./routes/authRoutes");
 const commentRoutes = require("./routes/commentRoutes");
 
-// Connect to database
-connectDB();
-
 // Initialize express app
 const app = express();
 
-// Create HTTP server
-const server = http.createServer(app);
+// Connect to database (cached in serverless)
+let dbConnection = null;
+const initDB = async () => {
+  if (!dbConnection) {
+    dbConnection = await connectDB();
+  }
+  return dbConnection;
+};
 
-// Initialize Socket.io with polling for Vercel compatibility
-const io = socketIo(server, {
-  cors: {
-    origin:
-      process.env.CLIENT_URL ||
-      "http://localhost:3000" ||
-      "https://comment-system-front.vercel.app/",
-    methods: ["GET", "POST"],
-    credentials: true,
-  },
-  transports: ["polling", "websocket"], // Polling first for serverless
-  allowEIO3: true,
-});
-
-// Make io accessible to routes
-app.set("io", io);
-
-// Socket.io connection handling
-io.on("connection", (socket) => {
-  console.log("New client connected:", socket.id);
-
-  socket.on("disconnect", () => {
-    console.log("Client disconnected:", socket.id);
-  });
-
-  // Join a specific page/room for targeted updates
-  socket.on("join-page", (pageId) => {
-    socket.join(pageId);
-    console.log(`Socket ${socket.id} joined page: ${pageId}`);
-  });
-
-  socket.on("leave-page", (pageId) => {
-    socket.leave(pageId);
-    console.log(`Socket ${socket.id} left page: ${pageId}`);
-  });
-});
+// Initialize DB on startup
+initDB();
 
 // Middleware
 app.use(helmet()); // Security headers
@@ -122,26 +89,13 @@ app.use((req, res) => {
 // Error handler middleware (should be last)
 app.use(errorHandler);
 
-// Export both app and server for Vercel
+// Export for Vercel
 module.exports = app;
-module.exports.io = io;
 
-// Start server for local development and Vercel
-const PORT = process.env.PORT || 5000;
-
-if (require.main === module) {
-  // Only start server if run directly (not imported)
-  server.listen(PORT, () => {
-    console.log(
-      `Server running in ${
-        process.env.NODE_ENV || "development"
-      } mode on port ${PORT}`
-    );
-    console.log(`WebSocket server is ready`);
+// For local development only
+if (process.env.NODE_ENV !== "production") {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
   });
 }
-
-// Handle unhandled promise rejections
-process.on("unhandledRejection", (err) => {
-  console.log(`Error: ${err.message}`);
-});
