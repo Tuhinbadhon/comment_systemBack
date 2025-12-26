@@ -57,8 +57,21 @@ const getCommentsValidation = [
     .withMessage("Limit must be between 1 and 100"),
   query("sortBy")
     .optional()
-    .isIn(["newest", "mostLiked", "mostDisliked"])
+    .isIn([
+      "newest",
+      "oldest",
+      "mostLiked",
+      "mostliked",
+      "most-liked",
+      "mostDisliked",
+      "mostdisliked",
+      "most-disliked",
+    ])
     .withMessage("Invalid sort option"),
+  query("filter")
+    .optional()
+    .isIn(["liked", "disliked"])
+    .withMessage("Invalid filter option"),
   query("parentId")
     .optional()
     .isMongoId()

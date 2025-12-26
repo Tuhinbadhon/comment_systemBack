@@ -15,8 +15,20 @@ exports.getComments = async (req, res, next) => {
 
     const skip = (page - 1) * limit;
 
-    // Build query
-    const query = { parentComment: parentId };
+    // Build query and filter
+    const filter = (req.query.filter || "").toLowerCase();
+    console.log("Filter:", filter); // Debug log
+
+    // Build match stage for aggregation
+    const matchStage = {};
+    // parentId may be null for top-level comments
+    matchStage.parentComment = parentId;
+
+    if (filter === "liked") {
+      matchStage.$expr = { $gt: [{ $size: "$likes" }, 0] };
+    } else if (filter === "disliked") {
+      matchStage.$expr = { $gt: [{ $size: "$dislikes" }, 0] };
+    }
 
     // Build sort
     let sort = {};
@@ -26,11 +38,20 @@ exports.getComments = async (req, res, next) => {
       case "most-liked":
         sort = { likeCount: -1, createdAt: -1 };
         console.log("Sorting by most liked");
+        // If filter not explicitly provided, treat this sort as a filter (only show liked comments)
+        if (!filter) {
+          matchStage.$expr = { $gt: [{ $size: "$likes" }, 0] };
+          console.log("Applying filter: liked (from sortBy)");
+        }
         break;
       case "mostdisliked":
       case "most-disliked":
         sort = { dislikeCount: -1, createdAt: -1 };
         console.log("Sorting by most disliked");
+        if (!filter) {
+          matchStage.$expr = { $gt: [{ $size: "$dislikes" }, 0] };
+          console.log("Applying filter: disliked (from sortBy)");
+        }
         break;
       case "oldest":
         sort = { createdAt: 1 };
@@ -45,9 +66,9 @@ exports.getComments = async (req, res, next) => {
 
     console.log("Sort object:", sort); // Debug log
 
-    // Get comments with aggregation for sorting by like/dislike count
+    // Get comments with aggregation for sorting/filtering by like/dislike count
     const comments = await Comment.aggregate([
-      { $match: query },
+      { $match: matchStage },
       {
         $addFields: {
           likeCount: { $size: "$likes" },
@@ -138,8 +159,8 @@ exports.getComments = async (req, res, next) => {
       },
     ]);
 
-    // Get total count
-    const total = await Comment.countDocuments(query);
+    // Get total count (use the same matchStage as aggregation)
+    const total = await Comment.countDocuments(matchStage);
 
     // Add user interaction status if authenticated
     if (req.user) {
