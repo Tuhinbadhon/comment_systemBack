@@ -1,5 +1,6 @@
 const Comment = require("../models/Comment");
 const pusher = require("../config/pusher");
+const commentService = require("../services/commentService");
 
 // @desc    Get all comments with pagination and sorting
 // @route   GET /api/comments
@@ -10,157 +11,16 @@ exports.getComments = async (req, res, next) => {
     const limit = parseInt(req.query.limit, 10) || 10;
     const sortBy = req.query.sortBy || "newest"; // newest, mostLiked, mostDisliked
     const parentId = req.query.parentId || null;
+    const filter = req.query.filter || "";
 
-    console.log("Sort by:", sortBy); // Debug log
-
-    const skip = (page - 1) * limit;
-
-    // Build query and filter
-    const filter = (req.query.filter || "").toLowerCase();
-    console.log("Filter:", filter); // Debug log
-
-    // Build match stage for aggregation
-    const matchStage = {};
-    // parentId may be null for top-level comments
-    matchStage.parentComment = parentId;
-
-    if (filter === "liked") {
-      matchStage.$expr = { $gt: [{ $size: "$likes" }, 0] };
-    } else if (filter === "disliked") {
-      matchStage.$expr = { $gt: [{ $size: "$dislikes" }, 0] };
-    }
-
-    // Build sort
-    let sort = {};
-    const sortByLower = sortBy.toLowerCase();
-    switch (sortByLower) {
-      case "mostliked":
-      case "most-liked":
-        sort = { likeCount: -1, createdAt: -1 };
-        console.log("Sorting by most liked");
-        // If filter not explicitly provided, treat this sort as a filter (only show liked comments)
-        if (!filter) {
-          matchStage.$expr = { $gt: [{ $size: "$likes" }, 0] };
-          console.log("Applying filter: liked (from sortBy)");
-        }
-        break;
-      case "mostdisliked":
-      case "most-disliked":
-        sort = { dislikeCount: -1, createdAt: -1 };
-        console.log("Sorting by most disliked");
-        if (!filter) {
-          matchStage.$expr = { $gt: [{ $size: "$dislikes" }, 0] };
-          console.log("Applying filter: disliked (from sortBy)");
-        }
-        break;
-      case "oldest":
-        sort = { createdAt: 1 };
-        console.log("Sorting by oldest");
-        break;
-      case "newest":
-      default:
-        sort = { createdAt: -1 };
-        console.log("Sorting by newest");
-        break;
-    }
-
-    console.log("Sort object:", sort); // Debug log
-
-    // Get comments with aggregation for sorting/filtering by like/dislike count
-    const comments = await Comment.aggregate([
-      { $match: matchStage },
-      {
-        $addFields: {
-          likeCount: { $size: "$likes" },
-          dislikeCount: { $size: "$dislikes" },
-          replyCount: { $size: "$replies" },
-        },
-      },
-      { $sort: sort },
-      { $skip: skip },
-      { $limit: limit },
-      {
-        $lookup: {
-          from: "users",
-          localField: "author",
-          foreignField: "_id",
-          as: "author",
-        },
-      },
-      { $unwind: "$author" },
-      {
-        $lookup: {
-          from: "comments",
-          localField: "replies",
-          foreignField: "_id",
-          as: "replies",
-        },
-      },
-      {
-        $lookup: {
-          from: "users",
-          localField: "replies.author",
-          foreignField: "_id",
-          as: "replyAuthors",
-        },
-      },
-      {
-        $addFields: {
-          replies: {
-            $map: {
-              input: "$replies",
-              as: "reply",
-              in: {
-                _id: "$$reply._id",
-                content: "$$reply.content",
-                author: {
-                  $arrayElemAt: [
-                    {
-                      $filter: {
-                        input: "$replyAuthors",
-                        as: "author",
-                        cond: { $eq: ["$$author._id", "$$reply.author"] },
-                      },
-                    },
-                    0,
-                  ],
-                },
-                likes: "$$reply.likes",
-                dislikes: "$$reply.dislikes",
-                likeCount: { $size: "$$reply.likes" },
-                dislikeCount: { $size: "$$reply.dislikes" },
-                isEdited: "$$reply.isEdited",
-                createdAt: "$$reply.createdAt",
-                updatedAt: "$$reply.updatedAt",
-              },
-            },
-          },
-        },
-      },
-      {
-        $project: {
-          content: 1,
-          author: {
-            _id: 1,
-            name: 1,
-            email: 1,
-          },
-          parentComment: 1,
-          likes: 1,
-          dislikes: 1,
-          replies: 1,
-          likeCount: 1,
-          dislikeCount: 1,
-          replyCount: 1,
-          isEdited: 1,
-          createdAt: 1,
-          updatedAt: 1,
-        },
-      },
-    ]);
-
-    // Get total count (use the same matchStage as aggregation)
-    const total = await Comment.countDocuments(matchStage);
+    // Delegate to service
+    const { comments, total } = await commentService.getComments({
+      page,
+      limit,
+      sortBy,
+      parentId,
+      filter,
+    });
 
     // Add user interaction status if authenticated
     if (req.user) {
@@ -194,24 +54,14 @@ exports.getComments = async (req, res, next) => {
 // @access  Public
 exports.getComment = async (req, res, next) => {
   try {
-    const comment = await Comment.findById(req.params.id)
-      .populate("author", "name email")
-      .populate({
-        path: "replies",
-        populate: {
-          path: "author",
-          select: "name email",
-        },
-      });
+    const comment = await commentService.getCommentById(req.params.id);
 
     if (!comment) {
-      return res.status(404).json({
-        success: false,
-        message: "Comment not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Comment not found" });
     }
 
-    // Add user interaction status if authenticated
     const commentObj = comment.toObject();
     if (req.user) {
       commentObj.isLikedByUser = comment.likes.some(
@@ -224,10 +74,7 @@ exports.getComment = async (req, res, next) => {
         comment.author._id.toString() === req.user.id.toString();
     }
 
-    res.status(200).json({
-      success: true,
-      data: commentObj,
-    });
+    res.status(200).json({ success: true, data: commentObj });
   } catch (error) {
     next(error);
   }
@@ -239,42 +86,11 @@ exports.getComment = async (req, res, next) => {
 exports.createComment = async (req, res, next) => {
   try {
     const { content, parentComment } = req.body;
-
-    // If it's a reply, verify parent comment exists
-    if (parentComment) {
-      const parentExists = await Comment.findById(parentComment);
-      if (!parentExists) {
-        return res.status(404).json({
-          success: false,
-          message: "Parent comment not found",
-        });
-      }
-    }
-
-    const comment = await Comment.create({
+    const comment = await commentService.createComment({
       content,
-      author: req.user.id,
-      parentComment: parentComment || null,
+      parentComment,
+      userId: req.user.id,
     });
-
-    // If it's a reply, add to parent's replies array
-    if (parentComment) {
-      await Comment.findByIdAndUpdate(parentComment, {
-        $push: { replies: comment._id },
-      });
-    }
-
-    await comment.populate("author", "name email");
-
-    // Trigger Pusher event for real-time update
-    try {
-      await pusher.trigger("comments", "comment:created", {
-        comment: comment.toObject(),
-        parentComment,
-      });
-    } catch (pusherError) {
-      console.error("Pusher error:", pusherError);
-    }
 
     res.status(201).json({
       success: true,
@@ -282,6 +98,8 @@ exports.createComment = async (req, res, next) => {
       data: comment,
     });
   } catch (error) {
+    if (error.message === "Parent comment not found")
+      return res.status(404).json({ success: false, message: error.message });
     next(error);
   }
 };
@@ -291,53 +109,22 @@ exports.createComment = async (req, res, next) => {
 // @access  Private
 exports.updateComment = async (req, res, next) => {
   try {
-    let comment = await Comment.findById(req.params.id);
-
-    if (!comment) {
-      return res.status(404).json({
-        success: false,
-        message: "Comment not found",
-      });
-    }
-
-    // Make sure user is comment owner
-    if (comment.author.toString() !== req.user.id) {
-      return res.status(403).json({
-        success: false,
-        message: "Not authorized to update this comment",
-      });
-    }
-
     const { content } = req.body;
-
-    comment = await Comment.findByIdAndUpdate(
-      req.params.id,
-      {
-        content,
-        isEdited: true,
-        updatedAt: Date.now(),
-      },
-      {
-        new: true,
-        runValidators: true,
-      }
-    ).populate("author", "name email");
-
-    // Trigger Pusher event for real-time update
-    try {
-      await pusher.trigger("comments", "comment:updated", {
-        comment: comment.toObject(),
-      });
-    } catch (pusherError) {
-      console.error("Pusher error:", pusherError);
-    }
-
+    const comment = await commentService.updateComment({
+      id: req.params.id,
+      content,
+      userId: req.user.id,
+    });
     res.status(200).json({
       success: true,
       message: "Comment updated successfully",
       data: comment,
     });
   } catch (error) {
+    if (error.message === "Comment not found")
+      return res.status(404).json({ success: false, message: error.message });
+    if (error.message === "Not authorized")
+      return res.status(403).json({ success: false, message: error.message });
     next(error);
   }
 };
@@ -347,52 +134,20 @@ exports.updateComment = async (req, res, next) => {
 // @access  Private
 exports.deleteComment = async (req, res, next) => {
   try {
-    const comment = await Comment.findById(req.params.id);
-
-    if (!comment) {
-      return res.status(404).json({
-        success: false,
-        message: "Comment not found",
-      });
-    }
-
-    // Make sure user is comment owner
-    if (comment.author.toString() !== req.user.id) {
-      return res.status(403).json({
-        success: false,
-        message: "Not authorized to delete this comment",
-      });
-    }
-
-    // If comment has a parent, remove from parent's replies
-    if (comment.parentComment) {
-      await Comment.findByIdAndUpdate(comment.parentComment, {
-        $pull: { replies: comment._id },
-      });
-    }
-
-    // Delete all replies to this comment
-    if (comment.replies && comment.replies.length > 0) {
-      await Comment.deleteMany({ _id: { $in: comment.replies } });
-    }
-
-    await comment.deleteOne();
-
-    // Trigger Pusher event for real-time update
-    try {
-      await pusher.trigger("comments", "comment:deleted", {
-        commentId: req.params.id,
-      });
-    } catch (pusherError) {
-      console.error("Pusher error:", pusherError);
-    }
-
+    await commentService.deleteComment({
+      id: req.params.id,
+      userId: req.user.id,
+    });
     res.status(200).json({
       success: true,
       message: "Comment deleted successfully",
       data: {},
     });
   } catch (error) {
+    if (error.message === "Comment not found")
+      return res.status(404).json({ success: false, message: error.message });
+    if (error.message === "Not authorized")
+      return res.status(403).json({ success: false, message: error.message });
     next(error);
   }
 };
@@ -568,6 +323,66 @@ exports.replyToComment = async (req, res, next) => {
       data: reply,
     });
   } catch (error) {
+    next(error);
+  }
+};
+
+// Override: delegate like/dislike/reply to service (keeps controllers thin)
+exports.likeComment = async (req, res, next) => {
+  try {
+    const { comment, likeCount, dislikeCount } =
+      await commentService.likeComment({
+        id: req.params.id,
+        userId: req.user.id,
+      });
+    return res.status(200).json({
+      success: true,
+      message: "Operation successful",
+      data: { comment, likeCount, dislikeCount },
+    });
+  } catch (error) {
+    if (error.message === "Comment not found")
+      return res.status(404).json({ success: false, message: error.message });
+    next(error);
+  }
+};
+
+exports.dislikeComment = async (req, res, next) => {
+  try {
+    const { comment, likeCount, dislikeCount } =
+      await commentService.dislikeComment({
+        id: req.params.id,
+        userId: req.user.id,
+      });
+    return res.status(200).json({
+      success: true,
+      message: "Operation successful",
+      data: { comment, likeCount, dislikeCount },
+    });
+  } catch (error) {
+    if (error.message === "Comment not found")
+      return res.status(404).json({ success: false, message: error.message });
+    next(error);
+  }
+};
+
+exports.replyToComment = async (req, res, next) => {
+  try {
+    const { content } = req.body;
+    const parentCommentId = req.params.id;
+    const reply = await commentService.replyToComment({
+      parentCommentId,
+      content,
+      userId: req.user.id,
+    });
+    return res.status(201).json({
+      success: true,
+      message: "Reply posted successfully",
+      data: reply,
+    });
+  } catch (error) {
+    if (error.message === "Parent comment not found")
+      return res.status(404).json({ success: false, message: error.message });
     next(error);
   }
 };
