@@ -1,30 +1,12 @@
-# Comment System Backend - MERN Stack
+# Comment System Backend
 
-A robust RESTful API for a comment system built with Node.js, Express.js, MongoDB, and JWT authentication. This backend supports features like comment CRUD operations, likes/dislikes, nested replies, pagination, sorting, and real-time updates via WebSockets.
+A concise, production-ready REST API for comments built with Node.js, Express, MongoDB, and JWT authentication. Supports authentication, comment CRUD, likes/dislikes, nested replies, pagination, sorting, and realtime updates (Pusher recommended for production).
 
 ## Features
 
-### Core Features
-
-- ✅ **JWT Authentication** - Secure user registration and login
-- ✅ **Comment CRUD Operations** - Create, read, update, and delete comments
-- ✅ **Authorization** - Only comment authors can edit/delete their own comments
-- ✅ **Like/Dislike System** - Users can like or dislike comments (one action per user)
-- ✅ **Nested Replies** - Support for replying to comments
-- ✅ **Pagination** - Efficient data loading with customizable page size
-- ✅ **Sorting** - Sort by newest, most liked, or most disliked
-- ✅ **Real-time Updates** - Pusher Channels (recommended for production) and Socket.io (local/dev). Note: **Socket.io is not recommended on serverless platforms such as Vercel** because persistent WebSocket connections are not supported; use Pusher Channels (or another hosted realtime service) in production.
-- ✅ **Input Validation** - Comprehensive validation using express-validator
-- ✅ **Error Handling** - Centralized error handling middleware
-- ✅ **Security** - Helmet, CORS, rate limiting
-
-### Technical Features
-
-- **Modular Architecture** - Clean separation of concerns (routes, controllers, models, middleware)
-- **MongoDB Aggregation** - Efficient queries with sorting by like/dislike counts
-- **JWT Token Management** - Secure token generation and verification
-- **Environment Configuration** - dotenv for environment variables
-- **Request Logging** - Morgan for HTTP request logging
+- Authentication (JWT), comment CRUD, likes/dislikes, replies, pagination, sorting
+- Realtime: **Pusher Channels** preferred for production (Socket.io for local/dev)
+- Validation, centralized error handling, and security middleware (helmet, CORS, rate-limiting)
 
 ## Tech Stack
 
@@ -42,73 +24,28 @@ A robust RESTful API for a comment system built with Node.js, Express.js, MongoD
 - **morgan** - HTTP request logger
 - **dotenv** - Environment variable management
 
-## Prerequisites
+## Quick setup
 
-- Node.js (v14 or higher)
-- MongoDB Atlas account or local MongoDB installation
-- npm or yarn package manager
+1. Clone & install
 
-## Installation
+```bash
+git clone <repo>
+cd Backend
+pnpm install
+```
 
-1. **Clone the repository**
+2. Configure env
 
-   ```bash
-   git clone <your-repo-url>
-   cd Backend
-   ```
+```bash
+cp .env.example .env
+# set MONGODB_URI, JWT_SECRET, CLIENT_URL, PUSHER_* etc.
+```
 
-2. **Install dependencies**
+3. Run
 
-   This project uses pnpm for package management:
-
-   ```bash
-   pnpm install
-   ```
-
-   If you don't have pnpm installed:
-
-   ```bash
-   npm install -g pnpm
-   ```
-
-   Alternatively, you can use npm:
-
-   ```bash
-   npm install
-   ```
-
-3. **Configure environment variables**
-
-   Create a `.env` file in the root directory (or copy from `.env.example`):
-
-   ```bash
-   cp .env.example .env
-   ```
-
-   Update the `.env` file with your configuration:
-
-   ```env
-   # Server Configuration
-   PORT=5000
-   NODE_ENV=development
-
-   # MongoDB Configuration
-   MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/comment-system?retryWrites=true&w=majority
-
-   # JWT Configuration
-   JWT_SECRET=your_super_secret_jwt_key_here_change_this_in_production
-   JWT_EXPIRE=7d
-
-   # CORS Configuration
-   CLIENT_URL=http://localhost:3000
-   ```
-
-4. **MongoDB Atlas Setup**
-   - Create a MongoDB Atlas account at [https://www.mongodb.com/cloud/atlas](https://www.mongodb.com/cloud/atlas)
-   - Create a new cluster
-   - Add a database user
-   - Whitelist your IP address (or allow access from all IPs: 0.0.0.0/0)
-   - Get your connection string and update `MONGODB_URI` in `.env`
+```bash
+pnpm dev
+```
 
 ## Running the Application
 
@@ -467,23 +404,28 @@ For production-ready realtime updates we use **Pusher Channels** instead of rely
   - `PUSHER_SECRET`
   - `PUSHER_CLUSTER`
 
-- Backend test endpoints and scripts:
+- Test:
 
-  - HTTP test: `GET /api/pusher/test` (returns timing and triggers a test event)
+  - HTTP test: `GET /api/pusher/test`
   - CLI: `node scripts/pusher-trigger.js`
 
 - Client (React) example:
 
 ```javascript
 import Pusher from "pusher-js";
-
 const pusher = new Pusher(process.env.REACT_APP_PUSHER_KEY, {
   cluster: process.env.REACT_APP_PUSHER_CLUSTER,
 });
 const channel = pusher.subscribe("comments");
-channel.bind("comment:created", (data) => {
-  console.log("New comment (Pusher):", data);
+channel.bind("comment:reply", ({ reply, parentCommentId }) => {
+  /* handle */
 });
+```
+
+channel.bind("comment:created", (data) => {
+console.log("New comment (Pusher):", data);
+});
+
 ```
 
 - Note: Use the Pusher dashboard to get the correct cluster (Singapore/ap1 is recommended for Bangladesh users).
@@ -520,22 +462,19 @@ channel.bind("comment:created", (data) => {
 ## Project Structure
 
 ```
+
 Backend/
-├── config/
-│   └── db.js                 # Database connection configuration
-├── controllers/
-│   ├── authController.js     # Authentication logic
-│   └── commentController.js  # Comment CRUD and interactions
-├── middleware/
-│   ├── auth.js              # JWT authentication middleware
-│   ├── errorHandler.js      # Global error handler
-│   └── validate.js          # Request validation middleware
-├── models/
-│   ├── User.js              # User schema
-│   └── Comment.js           # Comment schema
-├── routes/
-│   ├── authRoutes.js        # Authentication routes
-│   └── commentRoutes.js     # Comment routes
+├── config/ # Configuration (db, pusher)
+├── controllers/ # Express controllers
+├── middleware/ # Middleware (auth, validate, error handler)
+├── models/ # Mongoose models
+├── routes/ # Express routes
+├── services/ # Business logic (moved out of controllers)
+├── scripts/ # Helper scripts (pusher-trigger, ping clusters)
+├── utils/ # Utility helpers
+├── tests/ # (optional) tests and scripts
+
+```│ └── commentRoutes.js     # Comment routes
 ├── utils/
 │   └── generateToken.js     # JWT token generation utility
 ├── .env                     # Environment variables (not in repo)
