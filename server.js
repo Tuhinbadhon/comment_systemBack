@@ -25,7 +25,10 @@ const server = http.createServer(app);
 // Initialize Socket.io with polling for Vercel compatibility
 const io = socketIo(server, {
   cors: {
-    origin: process.env.CLIENT_URL || "http://localhost:3000",
+    origin:
+      process.env.CLIENT_URL ||
+      "http://localhost:3000" ||
+      "https://comment-system-front.vercel.app/",
     methods: ["GET", "POST"],
     credentials: true,
   },
