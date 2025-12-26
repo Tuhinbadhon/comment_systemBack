@@ -30,7 +30,10 @@ initDB();
 app.use(helmet()); // Security headers
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:3000",
+    origin:
+      process.env.CLIENT_URL ||
+      "http://localhost:3000" ||
+      "https://comment-system-front.vercel.app/login",
     credentials: true,
   })
 );
