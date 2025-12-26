@@ -13,7 +13,7 @@ A robust RESTful API for a comment system built with Node.js, Express.js, MongoD
 - ✅ **Nested Replies** - Support for replying to comments
 - ✅ **Pagination** - Efficient data loading with customizable page size
 - ✅ **Sorting** - Sort by newest, most liked, or most disliked
-- ✅ **Real-time Updates** - WebSocket integration using Socket.io
+- ✅ **Real-time Updates** - Pusher Channels (recommended for production) and Socket.io (local/dev). Note: **Socket.io is not recommended on serverless platforms such as Vercel** because persistent WebSocket connections are not supported; use Pusher Channels (or another hosted realtime service) in production.
 - ✅ **Input Validation** - Comprehensive validation using express-validator
 - ✅ **Error Handling** - Centralized error handling middleware
 - ✅ **Security** - Helmet, CORS, rate limiting
@@ -221,6 +221,7 @@ GET /api/comments?page=1&limit=10&sortBy=newest&parentId=null
 - `page` (optional, default: 1) - Page number
 - `limit` (optional, default: 10, max: 100) - Items per page
 - `sortBy` (optional, default: newest) - Sort option: `newest`, `mostLiked`, `mostDisliked`
+- `filter` (optional) - Filter results to comments with activity: `liked` (only comments with ≥1 like) or `disliked` (only comments with ≥1 dislike). You can combine with `sortBy`, e.g. `?filter=liked&sortBy=mostLiked`.
 - `parentId` (optional, default: null) - Filter by parent comment ID (for replies)
 
 **Response:**
@@ -233,12 +234,43 @@ GET /api/comments?page=1&limit=10&sortBy=newest&parentId=null
   "page": 1,
   "pages": 5,
   "data": [
+```
+
+#### Quick cURL examples
+
+- Get most liked (only comments with likes):
+
+```bash
+curl "http://localhost:5000/api/comments?sortBy=mostLiked&filter=liked"
+```
+
+- Get replies for a comment (paginated):
+
+```bash
+curl "http://localhost:5000/api/comments?parentId=<PARENT_ID>&page=1&limit=20"
+```
+
+- Post a reply (authorized):
+
+```bash
+curl -X POST "http://localhost:5000/api/comments/<PARENT_ID>/reply" \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"content":"This is a reply"}'
+```
+
+- Like a comment:
+
+```bash
+curl -X POST "http://localhost:5000/api/comments/<COMMENT_ID>/like" -H "Authorization: Bearer <TOKEN>"
+```
+
     {
       "_id": "comment_id",
       "content": "This is a comment",
       "author": {
         "_id": "user_id",
-        "username": "johndoe",
+        "name": "johndoe",
         "email": "john@example.com"
       },
       "parentComment": null,
@@ -252,15 +284,17 @@ GET /api/comments?page=1&limit=10&sortBy=newest&parentId=null
       "isDislikedByUser": false,
       "isAuthor": false
     }
-  ]
+
+]
 }
-```
+
+````
 
 #### 2. Get Single Comment
 
 ```http
 GET /api/comments/:id
-```
+````
 
 #### 3. Create Comment
 
@@ -419,6 +453,69 @@ socket.on("comment:disliked", (data) => {
 // Leave page
 socket.emit("leave-page", "page-id");
 ```
+
+---
+
+## Pusher (Channels) Integration 🔔
+
+For production-ready realtime updates we use **Pusher Channels** instead of relying on Socket.io in serverless environments.
+
+- Environment variables to set (both locally and in Vercel):
+
+  - `PUSHER_APP_ID`
+  - `PUSHER_KEY`
+  - `PUSHER_SECRET`
+  - `PUSHER_CLUSTER`
+
+- Backend test endpoints and scripts:
+
+  - HTTP test: `GET /api/pusher/test` (returns timing and triggers a test event)
+  - CLI: `node scripts/pusher-trigger.js`
+
+- Client (React) example:
+
+```javascript
+import Pusher from "pusher-js";
+
+const pusher = new Pusher(process.env.REACT_APP_PUSHER_KEY, {
+  cluster: process.env.REACT_APP_PUSHER_CLUSTER,
+});
+const channel = pusher.subscribe("comments");
+channel.bind("comment:created", (data) => {
+  console.log("New comment (Pusher):", data);
+});
+```
+
+- Note: Use the Pusher dashboard to get the correct cluster (Singapore/ap1 is recommended for Bangladesh users).
+
+- Event to listen for replies: `comment:reply` with payload `{ reply, parentCommentId }`.
+
+---
+
+## Deployment & Troubleshooting
+
+### Vercel deployment notes
+
+- Vercel runs serverless functions — persistent WebSocket servers (Socket.io) are not supported. Use **Pusher Channels** for realtime updates on Vercel.
+- Add all secrets in Vercel dashboard under Project > Settings > Environment Variables (`MONGODB_URI`, `JWT_SECRET`, `PUSHER_*`, `CLIENT_URL`, etc.).
+- Build & Install: ensure Install Command is `pnpm install` (or use default) and leave Build Command empty for this Node serverless setup.
+
+### MongoDB Atlas
+
+- If you see connection errors on Vercel, add `0.0.0.0/0` to Atlas Network Access (or whitelist the relevant IP range). Keep strong credentials.
+
+### Troubleshooting FAQ
+
+- Q: I get CORS errors on live
+  - A: Set `CLIENT_URL` in environment variables and ensure it's included in your CORS allowed origins. We accept `.vercel.app` domains by default.
+- Q: Serverless function returns 500 on Vercel
+  - A: Check Vercel function logs for stack traces; common causes: missing env vars, MongoDB not accessible, or code using `http.createServer()`/Socket.io. Use Pusher for realtime.
+- Q: Pusher events not received on the client
+  - A: Confirm `REACT_APP_PUSHER_KEY` and `REACT_APP_PUSHER_CLUSTER` are set in frontend env; ensure you use the correct cluster and channel name (`comments`).
+- Q: Sorting by likes/dislikes returns all data
+  - A: `/api/comments?sortBy=mostLiked` now also filters to only comments with likes (unless you pass an explicit `filter` param).
+
+---
 
 ## Project Structure
 
@@ -650,4 +747,5 @@ For questions or issues, please open an issue in the repository or contact the d
 ---
 
 **Note:** This is a demonstration project for a technical assessment. Ensure you update all security credentials and configurations before using in production.
+
 # comment_systemBack
